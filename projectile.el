@@ -418,6 +418,11 @@ Any function that does not take arguments will do."
   :type 'hook
   :package-version '(projectile . "0.14.0"))
 
+(defcustom projectile-test-always-prompt nil
+  "Controls whether running the tests for a project always prompt for a command."
+  :group 'projectile
+  :type 'boolean)
+
 (defcustom projectile-test-prefix-function 'projectile-test-prefix
   "Function to find test files prefix based on PROJECT-TYPE."
   :group 'projectile
@@ -2234,8 +2239,8 @@ regular expression."
   "Invoke `eshell' in the project's root."
   (interactive)
   (let ((eshell-buffer-name (concat "*eshell " (projectile-project-name) "*")))
-     (projectile-with-default-dir (projectile-project-root)
-       (eshell))))
+    (projectile-with-default-dir (projectile-project-root)
+      (eshell))))
 
 ;;;###autoload
 (defun projectile-run-term (program)
@@ -2524,37 +2529,31 @@ Should be set via .dir-locals.el.")
                (file-name-as-directory projectile-project-compilation-dir)))
     (projectile-project-root)))
 
-(defun projectile-maybe-read-command (arg default-cmd prompt)
-  "Prompt user for command unless DEFAULT-CMD is an Elisp function."
-  (if (and (or (stringp default-cmd) (null default-cmd))
-           (or compilation-read-command arg))
+
+(defun projectile-maybe-read-command (force default-cmd prompt)
+  "Conditionally read a command. If either FORCE-ARG or FORCE-VAR
+are true, always prompt. Otherwise, check the value of
+DEFAULT-CMD to see if it can be used. If it can, return it; if
+not, PROMPT for a command.
+
+DEFAULT-CMD can be used if: it is not null; it is an elisp
+function; it is a string and can be resolved to a command with
+`executable-find'."
+  (if (or force (null default-cmd))
       (projectile-read-command prompt default-cmd)
-    default-cmd))
+    (cond ((functionp default-cmd) default-cmd)
+          ((stringp default-cmd)
+           (if (executable-find default-cmd)
+               default-cmd
+             (progn
+               (message (format "Could not find configured executable `%s'" default-cmd))
+               (projectile-read-command prompt default-cmd)))))))
 
 (defun projectile-run-compilation (cmd)
   "Run external or Elisp compilation command CMD."
   (if (functionp cmd)
       (funcall cmd)
     (compilation-start cmd)))
-
-;;;###autoload
-(defun projectile-compile-project (arg &optional dir)
-  "Run project compilation command.
-
-Normally you'll be prompted for a compilation command, unless
-variable `compilation-read-command'.  You can force the prompt
-with a prefix ARG."
-  (interactive "P")
-  (let* ((project-root (projectile-project-root))
-         (default-directory (or dir (projectile-compilation-dir)))
-         (default-cmd (projectile-compilation-command default-directory))
-         (compilation-cmd (projectile-maybe-read-command arg default-cmd "Compile command: ")))
-    (puthash default-directory compilation-cmd projectile-compilation-cmd-map)
-    (save-some-buffers (not compilation-ask-about-save)
-                       (lambda ()
-                         (projectile-project-buffer-p (current-buffer)
-                                                      project-root)))
-    (projectile-run-compilation compilation-cmd)))
 
 (defadvice compilation-find-file (around projectile-compilation-find-file)
   "Try to find a buffer for FILENAME, if we cannot find it,
@@ -2577,36 +2576,49 @@ fallback to the original function."
                  filename))
     ad-do-it))
 
-;; TODO - factor this duplication out
+(defun projectile--do-project-action (force var cmd-fn prompt cmd-map)
+  "Run CMD-FN for the project -- a test, compile, or run command.
+Store that command in CMD-MAP for later. If needed, prompt the
+user for a new command with PROMPT. If FORCE or VAR are non-nil,
+prompt the user for a command."
+  (let* ((project-root (projectile-project-root))
+         (default-directory (or dir (projectile-compilation-dir)))
+         (do-force (or force var))
+         (default-cmd (cmd-fn default-directory))
+         (cmd (projectile-maybe-read-command do-force default-cmd prompt)))
+    (puthash default-directory compilation-cmd cmd-map)
+    (save-some-buffers (not compilation-ask-about-save)
+                       (lambda ()
+                         (projectile-project-buffer-p (current-buffer)
+                                                      project-root)))
+    (projectile-run-compilation cmd)))
+
+;;;###autoload
+(defun projectile-compile-project (arg &optional dir)
+  "Run project compilation command."
+  (interactive "P")
+  (projectile--do-project-action 'projectile-compilation-command
+                                 'compilation-read-command
+                                 "Compile command:  "
+                                 'projectile-compilation-cmd-map))
+
 ;;;###autoload
 (defun projectile-test-project (arg)
-  "Run project test command.
-
-Normally you'll be prompted for a compilation command, unless
-variable `compilation-read-command'.  You can force the prompt
-with a prefix ARG."
+  "Run project test command. With prefix ARG, force prompt."
   (interactive "P")
-  (let* ((project-root (projectile-project-root))
-         (default-cmd (projectile-test-command project-root))
-         (test-cmd (projectile-maybe-read-command arg default-cmd "Test command: "))
-         (default-directory project-root))
-    (puthash project-root test-cmd projectile-test-cmd-map)
-    (projectile-run-compilation test-cmd)))
+  (projectile--do-project-action 'projectile-test-command
+                                 'projectile-test-always-prompt
+                                 "Test command:  "
+                                 'projectile-test-cmd-map))
 
 ;;;###autoload
 (defun projectile-run-project (arg)
-  "Run project run command.
-
-Normally you'll be prompted for a compilation command, unless
-variable `compilation-read-command'.  You can force the prompt
-with a prefix ARG."
+  "Run project run command."
   (interactive "P")
-  (let* ((project-root (projectile-project-root))
-         (default-cmd (projectile-run-command project-root))
-         (run-cmd (projectile-maybe-read-command arg default-cmd "Run command: "))
-         (default-directory project-root))
-    (puthash project-root run-cmd projectile-run-cmd-map)
-    (projectile-run-compilation run-cmd)))
+  (projectile--do-project-action 'projectile-run-command
+                                 'projectile-run-always-prompt
+                                 "Run command:  "
+                                 'projectile-run-cmd-map))
 
 (defun projectile-open-projects ()
   "Return a list of all open projects.
