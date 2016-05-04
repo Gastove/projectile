@@ -2493,20 +2493,20 @@ Should be set via .dir-locals.el.")
 
 (defun projectile-compilation-command (compile-dir)
   "Retrieve the compilation command for COMPILE-DIR."
-  (or (gethash compile-dir projectile-compilation-cmd-map)
-      projectile-project-compilation-cmd
+  (or projectile-project-compilation-cmd
+      (gethash compile-dir projectile-compilation-cmd-map)
       (projectile-default-compilation-command (projectile-project-type))))
 
 (defun projectile-test-command (project)
   "Retrieve the test command for PROJECT."
-  (or (gethash project projectile-test-cmd-map)
-      projectile-project-test-cmd
+  (or projectile-project-test-cmd
+      (gethash project projectile-test-cmd-map)
       (projectile-default-test-command (projectile-project-type))))
 
 (defun projectile-run-command (project)
   "Retrieve the run command for PROJECT."
-  (or (gethash project projectile-run-cmd-map)
-      projectile-project-run-cmd
+  (or projectile-project-run-cmd
+      (gethash project projectile-run-cmd-map)
       (projectile-default-run-command (projectile-project-type))))
 
 (defun projectile-read-command (prompt command)
